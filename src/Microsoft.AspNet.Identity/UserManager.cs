@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Security.Claims;
 using System.Text;
 using System.Threading;
@@ -27,7 +28,7 @@ namespace Microsoft.AspNet.Identity
 
         private TimeSpan _defaultLockout = TimeSpan.Zero;
         private bool _disposed;
-        private HttpContext _context;
+        private readonly HttpContext _context;
 
         /// <summary>
         ///     Constructor
@@ -41,6 +42,7 @@ namespace Microsoft.AspNet.Identity
         /// <param name="errors"></param>
         /// <param name="tokenProviders"></param>
         /// <param name="loggerFactory"></param>
+        /// </summary>
         public UserManager(IUserStore<TUser> store,
             IOptions<IdentityOptions> optionsAccessor,
             IPasswordHasher<TUser> passwordHasher,
@@ -80,6 +82,8 @@ namespace Microsoft.AspNet.Identity
 
             Logger = logger?.CreateLogger<UserManager<TUser>>() ?? new Logger<UserManager<TUser>>(new LoggerFactory());
 
+            IdentityLogger = new IdentityLogger() { Logger = Logger };
+
             if (tokenProviders != null)
             {
                 foreach (var tokenProvider in tokenProviders)
@@ -107,6 +111,8 @@ namespace Microsoft.AspNet.Identity
         internal ILogger Logger { get; set; }
 
         internal IdentityOptions Options { get; set; }
+
+        protected IdentityLogger IdentityLogger { get; set; }
 
         /// <summary>
         ///     Returns true if the store is an IUserTwoFactorStore
@@ -244,13 +250,7 @@ namespace Microsoft.AspNet.Identity
             }
         }
 
-        private CancellationToken CancellationToken
-        {
-            get
-            {
-                return _context?.RequestAborted ?? CancellationToken.None; 
-            }
-        }
+        private CancellationToken CancellationToken => _context?.RequestAborted ?? CancellationToken.None;
 
         /// <summary>
         ///     Dispose the store context
@@ -331,7 +331,11 @@ namespace Microsoft.AspNet.Identity
             }
             await UpdateNormalizedUserNameAsync(user);
             await UpdateNormalizedEmailAsync(user);
-            return await LogResultAsync(await Store.CreateAsync(user, CancellationToken), user);
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                return IdentityLogger.LogIdentityResult(await Store.CreateAsync(user, CancellationToken));
+            }
         }
 
         /// <summary>
@@ -346,7 +350,11 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            return await LogResultAsync(await UpdateUserAsync(user), user);
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+            }
         }
 
         /// <summary>
@@ -361,7 +369,11 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            return await LogResultAsync(await Store.DeleteAsync(user, CancellationToken), user);
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                return IdentityLogger.LogIdentityResult(await Store.DeleteAsync(user, CancellationToken));
+            }
         }
 
         /// <summary>
@@ -432,7 +444,7 @@ namespace Microsoft.AspNet.Identity
         /// <summary>
         /// Normalize a key (user name, email) for uniqueness comparisons
         /// </summary>
-        /// <param name="userName"></param>
+        /// <param name="key"></param>
         /// <returns></returns>
         public virtual string NormalizeKey(string key)
         {
@@ -478,8 +490,12 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            await UpdateUserName(user, userName);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                await UpdateUserName(user, userName);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+            }
         }
 
         private async Task UpdateUserName(TUser user, string userName)
@@ -513,14 +529,18 @@ namespace Microsoft.AspNet.Identity
             {
                 return false;
             }
-            var result = await VerifyPasswordAsync(passwordStore, user, password);
-            if (result == PasswordVerificationResult.SuccessRehashNeeded)
-            {
-                await UpdatePasswordHash(passwordStore, user, password, validatePassword: false);
-                await UpdateUserAsync(user);
-            }
 
-            return await LogResultAsync(result != PasswordVerificationResult.Failed, user);
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                var result = await VerifyPasswordAsync(passwordStore, user, password);
+                if (result == PasswordVerificationResult.SuccessRehashNeeded)
+                {
+                    IdentityLogger.LogIdentityResult(await UpdatePasswordHash(passwordStore, user, password, validatePassword: false));
+                    IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                }
+
+                return IdentityLogger.LogResult(result != PasswordVerificationResult.Failed); 
+            }
         }
 
         /// <summary>
@@ -536,7 +556,11 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            return await LogResultAsync(await passwordStore.HasPasswordAsync(user, CancellationToken), user);
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                return IdentityLogger.LogResult(await passwordStore.HasPasswordAsync(user, CancellationToken));
+            }
         }
 
         /// <summary>
@@ -553,17 +577,21 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            var hash = await passwordStore.GetPasswordHashAsync(user, CancellationToken);
-            if (hash != null)
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                return await LogResultAsync(IdentityResult.Failed(ErrorDescriber.UserAlreadyHasPassword()), user);
+                var hash = await passwordStore.GetPasswordHashAsync(user, CancellationToken);
+                if (hash != null)
+                {
+                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.UserAlreadyHasPassword()));
+                }
+                var result = await UpdatePasswordHash(passwordStore, user, password);
+                if (!result.Succeeded)
+                {
+                    return IdentityLogger.LogIdentityResult(result);
+                }
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
             }
-            var result = await UpdatePasswordHash(passwordStore, user, password);
-            if (!result.Succeeded)
-            {
-                return await LogResultAsync(result, user);
-            }
-            return await LogResultAsync(await UpdateUserAsync(user), user);
         }
 
         /// <summary>
@@ -581,23 +609,26 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            if (await VerifyPasswordAsync(passwordStore, user, currentPassword) != PasswordVerificationResult.Failed)
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                var result = await UpdatePasswordHash(passwordStore, user, newPassword);
-                if (!result.Succeeded)
+                if (await VerifyPasswordAsync(passwordStore, user, currentPassword) != PasswordVerificationResult.Failed)
                 {
-                    return await LogResultAsync(result, user);
+                    var result = await UpdatePasswordHash(passwordStore, user, newPassword);
+                    if (!result.Succeeded)
+                    {
+                        return IdentityLogger.LogIdentityResult(result);
+                    }
+                    return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
                 }
-                return await LogResultAsync(await UpdateUserAsync(user), user);
+                return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.PasswordMismatch()));
             }
-            return await LogResultAsync(IdentityResult.Failed(ErrorDescriber.PasswordMismatch()), user);
         }
 
         /// <summary>
         ///     Remove a user's password
         /// </summary>
         /// <param name="user"></param>
-
         /// <returns></returns>
         public virtual async Task<IdentityResult> RemovePasswordAsync(TUser user,
             CancellationToken cancellationToken = default(CancellationToken))
@@ -608,8 +639,12 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            await UpdatePasswordHash(passwordStore, user, null, validatePassword: false);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                await UpdatePasswordHash(passwordStore, user, null, validatePassword: false);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+            }
         }
 
         internal async Task<IdentityResult> UpdatePasswordHash(IUserPasswordStore<TUser> passwordStore,
@@ -682,8 +717,12 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            await UpdateSecurityStampInternal(user);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                await UpdateSecurityStampInternal(user);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+            }
         }
 
         /// <summary>
@@ -694,9 +733,13 @@ namespace Microsoft.AspNet.Identity
         public virtual async Task<string> GeneratePasswordResetTokenAsync(TUser user)
         {
             ThrowIfDisposed();
-            var token = await GenerateUserTokenAsync(user, Options.PasswordResetTokenProvider, "ResetPassword");
-            await LogResultAsync(IdentityResult.Success, user);
-            return token;
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                var token = await GenerateUserTokenAsync(user, Options.PasswordResetTokenProvider, "ResetPassword");
+                IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                return token;
+            }
         }
 
         /// <summary>
@@ -713,18 +756,22 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            // Make sure the token is valid and the stamp matches
-            if (!await VerifyUserTokenAsync(user, Options.PasswordResetTokenProvider, "ResetPassword", token))
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                return await LogResultAsync(IdentityResult.Failed(ErrorDescriber.InvalidToken()), user);
+                // Make sure the token is valid and the stamp matches
+                if (!await VerifyUserTokenAsync(user, Options.PasswordResetTokenProvider, "ResetPassword", token))
+                {
+                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
+                }
+                var passwordStore = GetPasswordStore();
+                var result = await UpdatePasswordHash(passwordStore, user, newPassword);
+                if (!result.Succeeded)
+                {
+                    return IdentityLogger.LogIdentityResult(result);
+                }
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
             }
-            var passwordStore = GetPasswordStore();
-            var result = await UpdatePasswordHash(passwordStore, user, newPassword);
-            if (!result.Succeeded)
-            {
-                return await LogResultAsync(result, user);
-            }
-            return await LogResultAsync(await UpdateUserAsync(user), user);
         }
 
         // Update the security stamp if the store supports it
@@ -777,7 +824,8 @@ namespace Microsoft.AspNet.Identity
         ///     Remove a user login
         /// </summary>
         /// <param name="user"></param>
-        /// <param name="login"></param>
+        /// <param name="loginProvider"></param>
+        /// <param name="providerKey"></param>
         /// <returns></returns>
         public virtual async Task<IdentityResult> RemoveLoginAsync(TUser user, string loginProvider, string providerKey)
         {
@@ -795,9 +843,13 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            await loginStore.RemoveLoginAsync(user, loginProvider, providerKey, CancellationToken);
-            await UpdateSecurityStampInternal(user);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                await loginStore.RemoveLoginAsync(user, loginProvider, providerKey, CancellationToken);
+                await UpdateSecurityStampInternal(user);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+            }
         }
 
         /// <summary>
@@ -818,13 +870,17 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            var existingUser = await FindByLoginAsync(login.LoginProvider, login.ProviderKey);
-            if (existingUser != null)
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                return await LogResultAsync(IdentityResult.Failed(ErrorDescriber.LoginAlreadyAssociated()), user);
+                var existingUser = await FindByLoginAsync(login.LoginProvider, login.ProviderKey);
+                if (existingUser != null)
+                {
+                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.LoginAlreadyAssociated()));
+                }
+                await loginStore.AddLoginAsync(user, login, CancellationToken);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
             }
-            await loginStore.AddLoginAsync(user, login, CancellationToken);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
         }
 
         /// <summary>
@@ -893,8 +949,12 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            await claimStore.AddClaimsAsync(user, claims, CancellationToken);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                await claimStore.AddClaimsAsync(user, claims, CancellationToken);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+            }
         }
 
         /// <summary>
@@ -920,8 +980,12 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            await claimStore.ReplaceClaimAsync(user, claim, newClaim, CancellationToken);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                await claimStore.ReplaceClaimAsync(user, claim, newClaim, CancellationToken);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+            }
         }
 
         /// <summary>
@@ -963,8 +1027,12 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("claims");
             }
-            await claimStore.RemoveClaimsAsync(user, claims, CancellationToken);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                await claimStore.RemoveClaimsAsync(user, claims, CancellationToken);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+            }
         }
 
         /// <summary>
@@ -1007,13 +1075,17 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            var userRoles = await userRoleStore.GetRolesAsync(user, CancellationToken);
-            if (userRoles.Contains(role))
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                return await LogResultAsync(IdentityResult.Failed(ErrorDescriber.UserAlreadyInRole(role)), user);
+                var userRoles = await userRoleStore.GetRolesAsync(user, CancellationToken);
+                if (userRoles.Contains(role))
+                {
+                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.UserAlreadyInRole(role)));
+                }
+                await userRoleStore.AddToRoleAsync(user, role, CancellationToken);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
             }
-            await userRoleStore.AddToRoleAsync(user, role, CancellationToken);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
         }
 
         /// <summary>
@@ -1034,16 +1106,20 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("roles");
             }
-            var userRoles = await userRoleStore.GetRolesAsync(user, CancellationToken);
-            foreach (var role in roles)
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                if (userRoles.Contains(role))
+                var userRoles = await userRoleStore.GetRolesAsync(user, CancellationToken);
+                foreach (var role in roles)
                 {
-                    return await LogResultAsync(IdentityResult.Failed(ErrorDescriber.UserAlreadyInRole(role)), user);
+                    if (userRoles.Contains(role))
+                    {
+                        return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.UserAlreadyInRole(role)));
+                    }
+                    await userRoleStore.AddToRoleAsync(user, role, CancellationToken);
                 }
-                await userRoleStore.AddToRoleAsync(user, role, CancellationToken);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
             }
-            return await LogResultAsync(await UpdateUserAsync(user), user);
         }
 
         /// <summary>
@@ -1060,12 +1136,16 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            if (!await userRoleStore.IsInRoleAsync(user, role, CancellationToken))
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                return await LogResultAsync(IdentityResult.Failed(ErrorDescriber.UserNotInRole(role)), user);
+                if (!await userRoleStore.IsInRoleAsync(user, role, CancellationToken))
+                {
+                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.UserNotInRole(role)));
+                }
+                await userRoleStore.RemoveFromRoleAsync(user, role, CancellationToken);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
             }
-            await userRoleStore.RemoveFromRoleAsync(user, role, CancellationToken);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
         }
 
         /// <summary>
@@ -1086,15 +1166,19 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("roles");
             }
-            foreach (var role in roles)
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                if (!await userRoleStore.IsInRoleAsync(user, role, CancellationToken))
+                foreach (var role in roles)
                 {
-                    return await LogResultAsync(IdentityResult.Failed(ErrorDescriber.UserNotInRole(role)), user);
+                    if (!await userRoleStore.IsInRoleAsync(user, role, CancellationToken))
+                    {
+                        return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.UserNotInRole(role)));
+                    }
+                    await userRoleStore.RemoveFromRoleAsync(user, role, CancellationToken);
                 }
-                await userRoleStore.RemoveFromRoleAsync(user, role, CancellationToken);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
             }
-            return await LogResultAsync(await UpdateUserAsync(user), user);
         }
 
         /// <summary>
@@ -1171,10 +1255,14 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            await store.SetEmailAsync(user, email, CancellationToken);
-            await store.SetEmailConfirmedAsync(user, false, CancellationToken);
-            await UpdateSecurityStampInternal(user);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                await store.SetEmailAsync(user, email, CancellationToken);
+                await store.SetEmailConfirmedAsync(user, false, CancellationToken);
+                await UpdateSecurityStampInternal(user);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+            }
         }
 
         /// <summary>
@@ -1217,9 +1305,13 @@ namespace Microsoft.AspNet.Identity
         public async virtual Task<string> GenerateEmailConfirmationTokenAsync(TUser user)
         {
             ThrowIfDisposed();
-            var token = await GenerateUserTokenAsync(user, Options.EmailConfirmationTokenProvider, "Confirmation");
-            await LogResultAsync(IdentityResult.Success, user);
-            return token;
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                var token = await GenerateUserTokenAsync(user, Options.EmailConfirmationTokenProvider, "Confirmation");
+                IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                return token;
+            }
         }
 
         /// <summary>
@@ -1236,12 +1328,16 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            if (!await VerifyUserTokenAsync(user, Options.EmailConfirmationTokenProvider, "Confirmation", token))
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                return await LogResultAsync(IdentityResult.Failed(ErrorDescriber.InvalidToken()), user);
+                if (!await VerifyUserTokenAsync(user, Options.EmailConfirmationTokenProvider, "Confirmation", token))
+                {
+                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
+                }
+                await store.SetEmailConfirmedAsync(user, true, CancellationToken);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
             }
-            await store.SetEmailConfirmedAsync(user, true, CancellationToken);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
         }
 
         /// <summary>
@@ -1269,13 +1365,18 @@ namespace Microsoft.AspNet.Identity
         ///     Generate a change email token for the user using the UserTokenProvider
         /// </summary>
         /// <param name="user"></param>
+        /// <param name="newEmail"></param>
         /// <returns></returns>
         public virtual async Task<string> GenerateChangeEmailTokenAsync(TUser user, string newEmail)
         {
             ThrowIfDisposed();
-            var token = await GenerateUserTokenAsync(user, Options.ChangeEmailTokenProvider, GetChangeEmailPurpose(newEmail));
-            await LogResultAsync(IdentityResult.Success, user);
-            return token;
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                var token = await GenerateUserTokenAsync(user, Options.ChangeEmailTokenProvider, GetChangeEmailPurpose(newEmail));
+                IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                return token;
+            }
         }
 
         /// <summary>
@@ -1283,7 +1384,7 @@ namespace Microsoft.AspNet.Identity
         /// </summary>
         /// <param name="user"></param>
         /// <param name="token"></param>
-        /// <param name="newPassword"></param>
+        /// <param name="newEmail"></param>
         /// <returns></returns>
         public virtual async Task<IdentityResult> ChangeEmailAsync(TUser user, string newEmail, string token)
         {
@@ -1292,16 +1393,20 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            // Make sure the token is valid and the stamp matches
-            if (!await VerifyUserTokenAsync(user, Options.ChangeEmailTokenProvider, GetChangeEmailPurpose(newEmail), token))
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                return await LogResultAsync(IdentityResult.Failed(ErrorDescriber.InvalidToken()), user);
+                // Make sure the token is valid and the stamp matches
+                if (!await VerifyUserTokenAsync(user, Options.ChangeEmailTokenProvider, GetChangeEmailPurpose(newEmail), token))
+                {
+                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
+                }
+                var store = GetEmailStore();
+                await store.SetEmailAsync(user, newEmail, CancellationToken);
+                await store.SetEmailConfirmedAsync(user, true, CancellationToken);
+                await UpdateSecurityStampInternal(user);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
             }
-            var store = GetEmailStore();
-            await store.SetEmailAsync(user, newEmail, CancellationToken);
-            await store.SetEmailConfirmedAsync(user, true, CancellationToken);
-            await UpdateSecurityStampInternal(user);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
         }
 
         // IUserPhoneNumberStore methods
@@ -1345,10 +1450,14 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            await store.SetPhoneNumberAsync(user, phoneNumber, CancellationToken);
-            await store.SetPhoneNumberConfirmedAsync(user, false, CancellationToken);
-            await UpdateSecurityStampInternal(user);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                await store.SetPhoneNumberAsync(user, phoneNumber, CancellationToken);
+                await store.SetPhoneNumberConfirmedAsync(user, false, CancellationToken);
+                await UpdateSecurityStampInternal(user);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+            }
         }
 
         /// <summary>
@@ -1366,14 +1475,18 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            if (!await VerifyChangePhoneNumberTokenAsync(user, token, phoneNumber))
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                return await LogResultAsync(IdentityResult.Failed(ErrorDescriber.InvalidToken()), user);
+                if (!await VerifyChangePhoneNumberTokenAsync(user, token, phoneNumber))
+                {
+                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
+                }
+                await store.SetPhoneNumberAsync(user, phoneNumber, CancellationToken);
+                await store.SetPhoneNumberConfirmedAsync(user, true, CancellationToken);
+                await UpdateSecurityStampInternal(user);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
             }
-            await store.SetPhoneNumberAsync(user, phoneNumber, CancellationToken);
-            await store.SetPhoneNumberConfirmedAsync(user, true, CancellationToken);
-            await UpdateSecurityStampInternal(user);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
         }
 
         /// <summary>
@@ -1407,11 +1520,15 @@ namespace Microsoft.AspNet.Identity
         public virtual async Task<string> GenerateChangePhoneNumberTokenAsync(TUser user, string phoneNumber)
         {
             ThrowIfDisposed();
-            var token = Rfc6238AuthenticationService.GenerateCode(
-                await CreateSecurityTokenAsync(user), phoneNumber)
-                   .ToString(CultureInfo.InvariantCulture);
-            await LogResultAsync(IdentityResult.Success, user);
-            return token;
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                var token = Rfc6238AuthenticationService.GenerateCode(
+                        await CreateSecurityTokenAsync(user), phoneNumber)
+                           .ToString(CultureInfo.InvariantCulture);
+                IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                return token;
+            }
         }
 
         /// <summary>
@@ -1424,24 +1541,29 @@ namespace Microsoft.AspNet.Identity
         public virtual async Task<bool> VerifyChangePhoneNumberTokenAsync(TUser user, string token, string phoneNumber)
         {
             ThrowIfDisposed();
-            var securityToken = await CreateSecurityTokenAsync(user);
-            int code;
-            if (securityToken != null && Int32.TryParse(token, out code))
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                if (Rfc6238AuthenticationService.ValidateCode(securityToken, code, phoneNumber))
+                var securityToken = await CreateSecurityTokenAsync(user);
+                int code;
+                if (securityToken != null && Int32.TryParse(token, out code))
                 {
-                    await LogResultAsync(IdentityResult.Success, user);
-                    return true;
+                    if (Rfc6238AuthenticationService.ValidateCode(securityToken, code, phoneNumber))
+                    {
+                        IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                        return true;
+                    }
                 }
+                IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
+                return false;
             }
-            await LogResultAsync(IdentityResult.Failed(ErrorDescriber.InvalidToken()), user);
-            return false;
         }
 
         /// <summary>
         ///     Verify a user token with the specified purpose
         /// </summary>
         /// <param name="user"></param>
+        /// <param name="tokenProvider"></param>
         /// <param name="purpose"></param>
         /// <param name="token"></param>
         /// <returns></returns>
@@ -1456,23 +1578,27 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException(nameof(tokenProvider));
             }
-            if (!_tokenProviders.ContainsKey(tokenProvider))
-            {
-                throw new NotSupportedException(string.Format(CultureInfo.CurrentCulture, Resources.NoTokenProvider, tokenProvider));
-            }
-            // Make sure the token is valid
-            var result = await _tokenProviders[tokenProvider].ValidateAsync(purpose, token, this, user);
 
-            if (result)
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                await LogResultAsync(IdentityResult.Success, user);
-            }
-            else
-            {
-                await LogResultAsync(IdentityResult.Failed(ErrorDescriber.InvalidToken()), user);
-            }
+                if (!_tokenProviders.ContainsKey(tokenProvider))
+                {
+                    throw new NotSupportedException(string.Format(CultureInfo.CurrentCulture, Resources.NoTokenProvider, tokenProvider));
+                }
+                // Make sure the token is valid
+                var result = await _tokenProviders[tokenProvider].ValidateAsync(purpose, token, this, user);
 
-            return result;
+                if (result)
+                {
+                    IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                }
+                else
+                {
+                    IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
+                }
+
+                return result;
+            }
         }
 
         /// <summary>
@@ -1480,6 +1606,7 @@ namespace Microsoft.AspNet.Identity
         /// </summary>
         /// <param name="purpose"></param>
         /// <param name="user"></param>
+        /// <param name="tokenProvider"></param>
         /// <returns></returns>
         public virtual async Task<string> GenerateUserTokenAsync(TUser user, string tokenProvider, string purpose)
         {
@@ -1497,8 +1624,9 @@ namespace Microsoft.AspNet.Identity
                 throw new NotSupportedException(string.Format(CultureInfo.CurrentCulture, Resources.NoTokenProvider, tokenProvider));
             }
 
+            //TODO: Should we scope here ?
             var token = await _tokenProviders[tokenProvider].GenerateAsync(purpose, this, user);
-            await LogResultAsync(IdentityResult.Success, user);
+            IdentityLogger.LogIdentityResult(IdentityResult.Success);
             return token;
         }
 
@@ -1543,7 +1671,7 @@ namespace Microsoft.AspNet.Identity
         ///     Verify a user token with the specified provider
         /// </summary>
         /// <param name="user"></param>
-        /// <param name="twoFactorProvider"></param>
+        /// <param name="tokenProvider"></param>
         /// <param name="token"></param>
         /// <returns></returns>
         public virtual async Task<bool> VerifyTwoFactorTokenAsync(TUser user, string tokenProvider, string token)
@@ -1558,24 +1686,28 @@ namespace Microsoft.AspNet.Identity
                 throw new NotSupportedException(String.Format(CultureInfo.CurrentCulture,
                     Resources.NoTokenProvider, tokenProvider));
             }
-            // Make sure the token is valid
-            var result = await _tokenProviders[tokenProvider].ValidateAsync("TwoFactor", token, this, user);
-            if (result)
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                await LogResultAsync(IdentityResult.Success, user);
+                // Make sure the token is valid
+                var result = await _tokenProviders[tokenProvider].ValidateAsync("TwoFactor", token, this, user);
+                if (result)
+                {
+                    IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                }
+                else
+                {
+                    IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
+                }
+                return result;
             }
-            else
-            {
-                await LogResultAsync(IdentityResult.Failed(ErrorDescriber.InvalidToken()), user);
-            }
-            return result;
         }
 
         /// <summary>
         ///     Get a user token for a specific user factor provider
         /// </summary>
         /// <param name="user"></param>
-        /// <param name="twoFactorProvider"></param>
+        /// <param name="tokenProvider"></param>
         /// <returns></returns>
         public virtual async Task<string> GenerateTwoFactorTokenAsync(TUser user, string tokenProvider)
         {
@@ -1589,9 +1721,13 @@ namespace Microsoft.AspNet.Identity
                 throw new NotSupportedException(String.Format(CultureInfo.CurrentCulture,
                     Resources.NoTokenProvider, tokenProvider));
             }
-            var token = await _tokenProviders[tokenProvider].GenerateAsync("TwoFactor", this, user);
-            await LogResultAsync(IdentityResult.Success, user);
-            return token;
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                var token = await _tokenProviders[tokenProvider].GenerateAsync("TwoFactor", this, user);
+                IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                return token;
+            }
         }
 
         // IUserFactorStore methods
@@ -1635,9 +1771,13 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            await store.SetTwoFactorEnabledAsync(user, enabled, CancellationToken);
-            await UpdateSecurityStampInternal(user);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                await store.SetTwoFactorEnabledAsync(user, enabled, CancellationToken);
+                await UpdateSecurityStampInternal(user);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+            }
         }
 
         // IUserLockoutStore methods
@@ -1686,8 +1826,12 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            await store.SetLockoutEnabledAsync(user, enabled, CancellationToken);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            {
+                await store.SetLockoutEnabledAsync(user, enabled, CancellationToken);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+            }
         }
 
         /// <summary>
@@ -1736,12 +1880,16 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            if (!await store.GetLockoutEnabledAsync(user, CancellationToken))
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                return await LogResultAsync(IdentityResult.Failed(ErrorDescriber.UserLockoutNotEnabled()), user);
+                if (!await store.GetLockoutEnabledAsync(user, CancellationToken))
+                {
+                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.UserLockoutNotEnabled()));
+                }
+                await store.SetLockoutEndDateAsync(user, lockoutEnd, CancellationToken);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
             }
-            await store.SetLockoutEndDateAsync(user, lockoutEnd, CancellationToken);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
         }
 
         /// <summary>
@@ -1759,16 +1907,20 @@ namespace Microsoft.AspNet.Identity
             {
                 throw new ArgumentNullException("user");
             }
-            // If this puts the user over the threshold for lockout, lock them out and reset the access failed count
-            var count = await store.IncrementAccessFailedCountAsync(user, CancellationToken);
-            if (count < Options.Lockout.MaxFailedAccessAttempts)
+
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                return await LogResultAsync(await UpdateUserAsync(user), user);
+                // If this puts the user over the threshold for lockout, lock them out and reset the access failed count
+                var count = await store.IncrementAccessFailedCountAsync(user, CancellationToken);
+                if (count < Options.Lockout.MaxFailedAccessAttempts)
+                {
+                    return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                }
+                await store.SetLockoutEndDateAsync(user, DateTimeOffset.UtcNow.Add(Options.Lockout.DefaultLockoutTimeSpan),
+                    CancellationToken);
+                await store.ResetAccessFailedCountAsync(user, CancellationToken);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
             }
-            await store.SetLockoutEndDateAsync(user, DateTimeOffset.UtcNow.Add(Options.Lockout.DefaultLockoutTimeSpan),
-                CancellationToken);
-            await store.ResetAccessFailedCountAsync(user, CancellationToken);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
         }
 
         /// <summary>
@@ -1785,13 +1937,15 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            if (await GetAccessFailedCountAsync(user) == 0)
+            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                return IdentityResult.Success;
+                if (await GetAccessFailedCountAsync(user) == 0)
+                {
+                    return IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                }
+                await store.ResetAccessFailedCountAsync(user, CancellationToken);
+                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user)); 
             }
-
-            await store.ResetAccessFailedCountAsync(user, CancellationToken);
-            return await LogResultAsync(await UpdateUserAsync(user), user);
         }
 
         /// <summary>
@@ -1824,7 +1978,7 @@ namespace Microsoft.AspNet.Identity
         /// <summary>
         ///     Get all the users in a role
         /// </summary>
-        /// <param name="role"></param>
+        /// <param name="roleName"></param>
         /// <returns></returns>
         public virtual Task<IList<TUser>> GetUsersInRoleAsync(string roleName)
         {
@@ -1838,42 +1992,8 @@ namespace Microsoft.AspNet.Identity
             return store.GetUsersInRoleAsync(roleName, CancellationToken);
         }
 
-        /// <summary>
-        ///     Logs the current Identity Result and returns result object
-        /// </summary>
-        /// <param name="result"></param>
-        /// <param name="user"></param>
-        /// <param name="methodName"></param>
-        /// <returns></returns>
-        protected async Task<IdentityResult> LogResultAsync(IdentityResult result,
-            TUser user, [System.Runtime.CompilerServices.CallerMemberName] string methodName = "")
-        {
-            result.Log(Logger, Resources.FormatLoggingResultMessage(methodName, await GetUserIdAsync(user)));
-            return result;
-        }
-
-        /// <summary>
-        ///     Logs result of operation being true/false
-        /// </summary>
-        /// <param name="result"></param>
-        /// <param name="user"></param>
-        /// <param name="methodName"></param>
-        /// <returns>result</returns>
-        protected async Task<bool> LogResultAsync(bool result,
-            TUser user, [System.Runtime.CompilerServices.CallerMemberName] string methodName = "")
-        {
-            var baseMessage = Resources.FormatLoggingResultMessage(methodName, await GetUserIdAsync(user));
-            if (result)
-            {
-                Logger.LogInformation(string.Format("{0} : {1}", baseMessage, result.ToString()));
-            }
-            else
-            {
-                Logger.LogWarning(string.Format("{0} : {1}", baseMessage, result.ToString()));
-            }
-
-            return result;
-        }
+        protected virtual async Task<string> GetScopeMessageforUserAsync(TUser user, [CallerMemberName] string methodName = null)
+            => string.Format("{0} for user: {1}", methodName, await GetUserIdAsync(user));
 
         private void ThrowIfDisposed()
         {

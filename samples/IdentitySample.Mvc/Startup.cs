@@ -7,6 +7,8 @@ using Microsoft.Framework.ConfigurationModel;
 using Microsoft.Framework.DependencyInjection;
 using Microsoft.Framework.Logging;
 using Microsoft.Framework.Logging.Console;
+using NLog.Config;
+using NLog.Targets;
 
 namespace IdentitySamples
 {
@@ -60,7 +62,16 @@ namespace IdentitySamples
 
         public void Configure(IApplicationBuilder app, ILoggerFactory loggerFactory)
         {
-	    loggerFactory.AddConsole();
+            var config = new LoggingConfiguration();
+
+            // Step 2. Create targets and add them to the configuration 
+            var consoleTarget = new ColoredConsoleTarget();
+            config.AddTarget("console", consoleTarget);
+            consoleTarget.Layout = @"${date:format=HH\\:MM\\:ss} ${ndc} ${logger} ${message} ";
+            var rule1 = new LoggingRule("*", NLog.LogLevel.Info, consoleTarget);
+            config.LoggingRules.Add(rule1);
+
+            loggerFactory.AddNLog(new global::NLog.LogFactory(config));
 
             app.UseErrorPage(ErrorPageOptions.ShowAll)
                .UseStaticFiles()
