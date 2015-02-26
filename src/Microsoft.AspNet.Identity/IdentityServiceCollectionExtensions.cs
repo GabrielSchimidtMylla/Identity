@@ -23,11 +23,6 @@ namespace Microsoft.Framework.DependencyInjection
             return services.Configure<IdentityOptions>(config);
         }
 
-        public static IdentityBuilder AddIdentity(this IServiceCollection services)
-        {
-            return services.AddIdentity<IdentityUser, IdentityRole>(configureOptions: null);
-        }
-
         public static IdentityBuilder AddIdentity<TUser, TRole>(
             this IServiceCollection services)
             where TUser : class

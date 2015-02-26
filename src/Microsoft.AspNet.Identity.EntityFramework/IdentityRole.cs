@@ -4,7 +4,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Microsoft.AspNet.Identity
+namespace Microsoft.AspNet.Identity.EntityFramework
 {
     /// <summary>
     ///     Represents a Role entity
