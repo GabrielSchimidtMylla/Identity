@@ -92,16 +92,16 @@ namespace Microsoft.AspNet.Identity.EntityFramework
         /// <summary>
         ///     Navigation property for users in the role
         /// </summary>
-        public virtual ICollection<IdentityUserRole<TKey>> Roles { get; private set; } = new List<IdentityUserRole<TKey>>();
+        public virtual ICollection<IdentityUserRole<TKey>> Roles { get; set; } = new List<IdentityUserRole<TKey>>();
 
         /// <summary>
         ///     Navigation property for users claims
         /// </summary>
-        public virtual ICollection<IdentityUserClaim<TKey>> Claims { get; private set; } = new List<IdentityUserClaim<TKey>>();
+        public virtual ICollection<IdentityUserClaim<TKey>> Claims { get; set; } = new List<IdentityUserClaim<TKey>>();
 
         /// <summary>
         ///     Navigation property for users logins
         /// </summary>
-        public virtual ICollection<IdentityUserLogin<TKey>> Logins { get; private set; } = new List<IdentityUserLogin<TKey>>();
+        public virtual ICollection<IdentityUserLogin<TKey>> Logins { get; set; } = new List<IdentityUserLogin<TKey>>();
     }
 }
