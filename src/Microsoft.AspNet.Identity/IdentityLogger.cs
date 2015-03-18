@@ -9,9 +9,14 @@ namespace Microsoft.AspNet.Identity
 {
     public class IdentityLogger
     {
-        public ILogger Logger { get; set; }
+        public IdentityLogger(ILogger logger)
+        {
+            Logger = logger;
+        }
 
-        public virtual TResult LogResult<TResult>(TResult result, Func<TResult, LogLevel> getLevel,
+        protected internal virtual ILogger Logger { get; set; }
+
+        public virtual TResult Log<TResult>(TResult result, Func<TResult, LogLevel> getLevel,
             Func<string> messageAccessor)
         {
             var logLevel = getLevel(result);
@@ -25,15 +30,17 @@ namespace Microsoft.AspNet.Identity
             return result;
         }
 
-        public virtual SignInResult LogSignInResult(SignInResult result, [CallerMemberName]string methodName = null)
-           => LogResult(result, r => r.GetLogLevel(), () => Resources.FormatLoggingSigninResult(methodName, result));
+        public virtual SignInResult Log(SignInResult result, [CallerMemberName]string methodName = null)
+           => Log(result, r => r.GetLogLevel(), () => Resources.FormatLoggingSigninResult(methodName, result));
 
-        public virtual IdentityResult LogIdentityResult(IdentityResult result, [CallerMemberName]string methodName = null)
-            => LogResult(result, r => r.GetLogLevel(), () => Resources.FormatLoggingIdentityResult(methodName, result));
+        public virtual IdentityResult Log(IdentityResult result, [CallerMemberName]string methodName = null)
+            => Log(result, r => r.GetLogLevel(), () => Resources.FormatLoggingIdentityResult(methodName, result));
 
-        public virtual bool LogResult(bool result, [CallerMemberName]string methodName = null)
-            => LogResult<bool>(result, (b) => b ? LogLevel.Verbose : LogLevel.Warning,
+        public virtual bool Log(bool result, [CallerMemberName]string methodName = null)
+            => Log<bool>(result, (b) => b ? LogLevel.Verbose : LogLevel.Warning,
                                () => Resources.FormatLoggingIdentityResult(methodName, result));
+
+        public virtual IDisposable BeginScope(string state) => Logger.BeginScope(state);
 
     }
 }

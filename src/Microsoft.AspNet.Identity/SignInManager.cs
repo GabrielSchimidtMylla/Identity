@@ -47,16 +47,16 @@ namespace Microsoft.AspNet.Identity
             ClaimsFactory = claimsFactory;
             Options = optionsAccessor?.Options ?? new IdentityOptions();
 
-            Logger = logger?.CreateLogger<SignInManager<TUser>>() ?? new Logger<SignInManager<TUser>>(new LoggerFactory());
-            IdentityLogger = new IdentityLogger() { Logger = Logger };
+            var baseLogger = logger?.CreateLogger<SignInManager<TUser>>() ?? new Logger<SignInManager<TUser>>(new LoggerFactory());
+            IdentityLogger = new IdentityLogger(baseLogger);
         }
 
+        protected internal virtual IdentityLogger IdentityLogger { get; set; }
         internal UserManager<TUser> UserManager { get; private set; }
         internal HttpContext Context { get; private set; }
         internal IUserClaimsPrincipalFactory<TUser> ClaimsFactory { get; private set; }
         internal IdentityOptions Options { get; private set; }
-        internal ILogger Logger { get; set; }
-        protected IdentityLogger IdentityLogger { get; set; }
+       
 
         // Should this be a func?
         public virtual async Task<ClaimsPrincipal> CreateUserPrincipalAsync(TUser user) => await ClaimsFactory.CreateAsync(user);
@@ -66,7 +66,7 @@ namespace Microsoft.AspNet.Identity
             var result = !(Options.SignIn.RequireConfirmedEmail && !(await UserManager.IsEmailConfirmedAsync(user))) ||
                           (Options.SignIn.RequireConfirmedPhoneNumber && !(await UserManager.IsPhoneNumberConfirmedAsync(user)));
 
-            return IdentityLogger.LogResult(result);
+            return IdentityLogger.Log(result);
         }
 
         public virtual async Task SignInAsync(TUser user, bool isPersistent, string authenticationMethod = null)
@@ -146,21 +146,21 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException(nameof(user));
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 var error = await PreSignInCheck(user);
                 if (error != null)
                 {
-                    return IdentityLogger.LogSignInResult(error);
+                    return IdentityLogger.Log(error);
                 }
                 if (await IsLockedOut(user))
                 {
-                    return IdentityLogger.LogSignInResult(SignInResult.LockedOut);
+                    return IdentityLogger.Log(SignInResult.LockedOut);
                 }
                 if (await UserManager.CheckPasswordAsync(user, password))
                 {
                     await ResetLockout(user);
-                    return IdentityLogger.LogSignInResult(await SignInOrTwoFactorAsync(user, isPersistent));
+                    return IdentityLogger.Log(await SignInOrTwoFactorAsync(user, isPersistent));
                 }
                 if (UserManager.SupportsUserLockout && shouldLockout)
                 {
@@ -169,10 +169,10 @@ namespace Microsoft.AspNet.Identity
                     if (await UserManager.IsLockedOutAsync(user))
                     {
 
-                        return IdentityLogger.LogSignInResult(SignInResult.LockedOut);
+                        return IdentityLogger.Log(SignInResult.LockedOut);
                     }
                 }
-                return IdentityLogger.LogSignInResult(SignInResult.Failed);
+                return IdentityLogger.Log(SignInResult.Failed);
             }
         }
 
@@ -240,12 +240,12 @@ namespace Microsoft.AspNet.Identity
                 return SignInResult.Failed;
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 var error = await PreSignInCheck(user);
                 if (error != null)
                 {
-                    return IdentityLogger.LogSignInResult(error);
+                    return IdentityLogger.Log(error);
                 }
                 if (await UserManager.VerifyTwoFactorTokenAsync(user, provider, code))
                 {
@@ -263,11 +263,11 @@ namespace Microsoft.AspNet.Identity
                     }
                     await UserManager.ResetAccessFailedCountAsync(user);
                     await SignInAsync(user, isPersistent);
-                    return IdentityLogger.LogSignInResult(SignInResult.Success);
+                    return IdentityLogger.Log(SignInResult.Success);
                 }
                 // If the token is incorrect, record the failure which also may cause the user to be locked out
                 await UserManager.AccessFailedAsync(user);
-                return IdentityLogger.LogSignInResult(SignInResult.Failed);
+                return IdentityLogger.Log(SignInResult.Failed);
             }
         }
 
@@ -294,14 +294,14 @@ namespace Microsoft.AspNet.Identity
                 return SignInResult.Failed;
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 var error = await PreSignInCheck(user);
                 if (error != null)
                 {
-                    return IdentityLogger.LogSignInResult(error);
+                    return IdentityLogger.Log(error);
                 }
-                return IdentityLogger.LogSignInResult(await SignInOrTwoFactorAsync(user, isPersistent, loginProvider));
+                return IdentityLogger.Log(await SignInOrTwoFactorAsync(user, isPersistent, loginProvider));
             }
         }
 

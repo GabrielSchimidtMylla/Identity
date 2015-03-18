@@ -56,14 +56,19 @@ namespace Microsoft.AspNet.Identity
                 }
             }
 
-            Logger = logger?.CreateLogger<RoleManager<TRole>>() ?? new Logger<RoleManager<TRole>>(new LoggerFactory());
-            IdentityLogger = new IdentityLogger() { Logger = Logger };
+            var baseLogger = logger?.CreateLogger<RoleManager<TRole>>() ?? new Logger<RoleManager<TRole>>(new LoggerFactory());
+            IdentityLogger = new IdentityLogger(baseLogger);
         }
 
         /// <summary>
         ///     Persistence abstraction that the Manager operates against
         /// </summary>
         protected IRoleStore<TRole> Store { get; private set; }
+
+        /// <summary>
+        ///     Used to create scopes and messages for logging
+        /// </summary>
+        protected internal virtual IdentityLogger IdentityLogger { get; set; }
 
         /// <summary>
         ///     Used to validate roles before persisting changes
@@ -76,19 +81,9 @@ namespace Microsoft.AspNet.Identity
         internal IdentityErrorDescriber ErrorDescriber { get; set; }
 
         /// <summary>
-        ///     Used to create scopes and messages for logging
-        /// </summary>
-        internal ILogger Logger { get; set; }
-
-        /// <summary>
         ///     Used to normalize user names, role names, emails for uniqueness
         /// </summary>
         internal ILookupNormalizer KeyNormalizer { get; set; }
-
-        /// <summary>
-        ///     Log messages based on result
-        /// </summary>
-        protected IdentityLogger IdentityLogger { get; set; }
 
         /// <summary>
         ///     Returns an IQueryable of roles if the store is an IQueryableRoleStore
@@ -174,9 +169,9 @@ namespace Microsoft.AspNet.Identity
             }
             await UpdateNormalizedRoleNameAsync(role);
 
-            using (Logger.BeginScope(await GetScopeMessageforRoleAsync(role)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforRoleAsync(role)))
             {
-                return IdentityLogger.LogIdentityResult(await Store.CreateAsync(role, CancellationToken));
+                return IdentityLogger.Log(await Store.CreateAsync(role, CancellationToken));
             }
         }
 
@@ -205,9 +200,9 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("role");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforRoleAsync(role)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforRoleAsync(role)))
             {
-                return IdentityLogger.LogIdentityResult(await UpdateRoleAsync(role));
+                return IdentityLogger.Log(await UpdateRoleAsync(role));
             }
         }
 
@@ -235,9 +230,9 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("role");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforRoleAsync(role)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforRoleAsync(role)))
             {
-                return IdentityLogger.LogIdentityResult(await Store.DeleteAsync(role, CancellationToken));
+                return IdentityLogger.Log(await Store.DeleteAsync(role, CancellationToken));
             }
         }
 
@@ -300,11 +295,11 @@ namespace Microsoft.AspNet.Identity
         {
             ThrowIfDisposed();
 
-            using (Logger.BeginScope(await GetScopeMessageforRoleAsync(role)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforRoleAsync(role)))
             {
                 await Store.SetRoleNameAsync(role, name, CancellationToken);
                 await UpdateNormalizedRoleNameAsync(role);
-                return IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                return IdentityLogger.Log(IdentityResult.Success);
             }
         }
 
@@ -365,10 +360,10 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("role");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforRoleAsync(role)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforRoleAsync(role)))
             {
                 await claimStore.AddClaimAsync(role, claim, CancellationToken);
-                return IdentityLogger.LogIdentityResult(await UpdateRoleAsync(role));
+                return IdentityLogger.Log(await UpdateRoleAsync(role));
             }
         }
 
@@ -387,10 +382,10 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("role");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforRoleAsync(role)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforRoleAsync(role)))
             {
                 await claimStore.RemoveClaimAsync(role, claim, CancellationToken);
-                return IdentityLogger.LogIdentityResult(await UpdateRoleAsync(role));
+                return IdentityLogger.Log(await UpdateRoleAsync(role));
             }
         }
 

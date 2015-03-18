@@ -80,9 +80,9 @@ namespace Microsoft.AspNet.Identity
                 }
             }
 
-            Logger = logger?.CreateLogger<UserManager<TUser>>() ?? new Logger<UserManager<TUser>>(new LoggerFactory());
+            var baseLogger = logger?.CreateLogger<UserManager<TUser>>() ?? new Logger<UserManager<TUser>>(new LoggerFactory());
 
-            IdentityLogger = new IdentityLogger() { Logger = Logger };
+            IdentityLogger = new IdentityLogger(baseLogger);
 
             if (tokenProviders != null)
             {
@@ -98,6 +98,11 @@ namespace Microsoft.AspNet.Identity
         /// </summary>
         protected internal IUserStore<TUser> Store { get; set; }
 
+        /// <summary>
+        ///     Used to log messages
+        /// </summary>
+        protected internal virtual IdentityLogger IdentityLogger { get; set; }
+
         internal IPasswordHasher<TUser> PasswordHasher { get; set; }
 
         internal IList<IUserValidator<TUser>> UserValidators { get; } = new List<IUserValidator<TUser>>();
@@ -108,11 +113,7 @@ namespace Microsoft.AspNet.Identity
 
         internal IdentityErrorDescriber ErrorDescriber { get; set; }
 
-        internal ILogger Logger { get; set; }
-
         internal IdentityOptions Options { get; set; }
-
-        protected IdentityLogger IdentityLogger { get; set; }
 
         /// <summary>
         ///     Returns true if the store is an IUserTwoFactorStore
@@ -332,9 +333,9 @@ namespace Microsoft.AspNet.Identity
             await UpdateNormalizedUserNameAsync(user);
             await UpdateNormalizedEmailAsync(user);
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                return IdentityLogger.LogIdentityResult(await Store.CreateAsync(user, CancellationToken));
+                return IdentityLogger.Log(await Store.CreateAsync(user, CancellationToken));
             }
         }
 
@@ -351,9 +352,9 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -370,9 +371,9 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                return IdentityLogger.LogIdentityResult(await Store.DeleteAsync(user, CancellationToken));
+                return IdentityLogger.Log(await Store.DeleteAsync(user, CancellationToken));
             }
         }
 
@@ -491,10 +492,10 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 await UpdateUserName(user, userName);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -530,16 +531,16 @@ namespace Microsoft.AspNet.Identity
                 return false;
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 var result = await VerifyPasswordAsync(passwordStore, user, password);
                 if (result == PasswordVerificationResult.SuccessRehashNeeded)
                 {
-                    IdentityLogger.LogIdentityResult(await UpdatePasswordHash(passwordStore, user, password, validatePassword: false));
-                    IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                    IdentityLogger.Log(await UpdatePasswordHash(passwordStore, user, password, validatePassword: false));
+                    IdentityLogger.Log(await UpdateUserAsync(user));
                 }
 
-                return IdentityLogger.LogResult(result != PasswordVerificationResult.Failed); 
+                return IdentityLogger.Log(result != PasswordVerificationResult.Failed); 
             }
         }
 
@@ -557,9 +558,9 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                return IdentityLogger.LogResult(await passwordStore.HasPasswordAsync(user, CancellationToken));
+                return IdentityLogger.Log(await passwordStore.HasPasswordAsync(user, CancellationToken));
             }
         }
 
@@ -578,19 +579,19 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 var hash = await passwordStore.GetPasswordHashAsync(user, CancellationToken);
                 if (hash != null)
                 {
-                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.UserAlreadyHasPassword()));
+                    return IdentityLogger.Log(IdentityResult.Failed(ErrorDescriber.UserAlreadyHasPassword()));
                 }
                 var result = await UpdatePasswordHash(passwordStore, user, password);
                 if (!result.Succeeded)
                 {
-                    return IdentityLogger.LogIdentityResult(result);
+                    return IdentityLogger.Log(result);
                 }
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -610,18 +611,18 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 if (await VerifyPasswordAsync(passwordStore, user, currentPassword) != PasswordVerificationResult.Failed)
                 {
                     var result = await UpdatePasswordHash(passwordStore, user, newPassword);
                     if (!result.Succeeded)
                     {
-                        return IdentityLogger.LogIdentityResult(result);
+                        return IdentityLogger.Log(result);
                     }
-                    return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                    return IdentityLogger.Log(await UpdateUserAsync(user));
                 }
-                return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.PasswordMismatch()));
+                return IdentityLogger.Log(IdentityResult.Failed(ErrorDescriber.PasswordMismatch()));
             }
         }
 
@@ -640,10 +641,10 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 await UpdatePasswordHash(passwordStore, user, null, validatePassword: false);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -718,10 +719,10 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 await UpdateSecurityStampInternal(user);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -734,10 +735,10 @@ namespace Microsoft.AspNet.Identity
         {
             ThrowIfDisposed();
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 var token = await GenerateUserTokenAsync(user, Options.PasswordResetTokenProvider, "ResetPassword");
-                IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                IdentityLogger.Log(IdentityResult.Success);
                 return token;
             }
         }
@@ -757,20 +758,20 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 // Make sure the token is valid and the stamp matches
                 if (!await VerifyUserTokenAsync(user, Options.PasswordResetTokenProvider, "ResetPassword", token))
                 {
-                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
+                    return IdentityLogger.Log(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
                 }
                 var passwordStore = GetPasswordStore();
                 var result = await UpdatePasswordHash(passwordStore, user, newPassword);
                 if (!result.Succeeded)
                 {
-                    return IdentityLogger.LogIdentityResult(result);
+                    return IdentityLogger.Log(result);
                 }
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -844,11 +845,11 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 await loginStore.RemoveLoginAsync(user, loginProvider, providerKey, CancellationToken);
                 await UpdateSecurityStampInternal(user);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -871,15 +872,15 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 var existingUser = await FindByLoginAsync(login.LoginProvider, login.ProviderKey);
                 if (existingUser != null)
                 {
-                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.LoginAlreadyAssociated()));
+                    return IdentityLogger.Log(IdentityResult.Failed(ErrorDescriber.LoginAlreadyAssociated()));
                 }
                 await loginStore.AddLoginAsync(user, login, CancellationToken);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -950,10 +951,10 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 await claimStore.AddClaimsAsync(user, claims, CancellationToken);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -981,10 +982,10 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 await claimStore.ReplaceClaimAsync(user, claim, newClaim, CancellationToken);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -1028,10 +1029,10 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("claims");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 await claimStore.RemoveClaimsAsync(user, claims, CancellationToken);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -1076,15 +1077,15 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 var userRoles = await userRoleStore.GetRolesAsync(user, CancellationToken);
                 if (userRoles.Contains(role))
                 {
-                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.UserAlreadyInRole(role)));
+                    return IdentityLogger.Log(IdentityResult.Failed(ErrorDescriber.UserAlreadyInRole(role)));
                 }
                 await userRoleStore.AddToRoleAsync(user, role, CancellationToken);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -1107,18 +1108,18 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("roles");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 var userRoles = await userRoleStore.GetRolesAsync(user, CancellationToken);
                 foreach (var role in roles)
                 {
                     if (userRoles.Contains(role))
                     {
-                        return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.UserAlreadyInRole(role)));
+                        return IdentityLogger.Log(IdentityResult.Failed(ErrorDescriber.UserAlreadyInRole(role)));
                     }
                     await userRoleStore.AddToRoleAsync(user, role, CancellationToken);
                 }
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -1137,14 +1138,14 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 if (!await userRoleStore.IsInRoleAsync(user, role, CancellationToken))
                 {
-                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.UserNotInRole(role)));
+                    return IdentityLogger.Log(IdentityResult.Failed(ErrorDescriber.UserNotInRole(role)));
                 }
                 await userRoleStore.RemoveFromRoleAsync(user, role, CancellationToken);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -1167,17 +1168,17 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("roles");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 foreach (var role in roles)
                 {
                     if (!await userRoleStore.IsInRoleAsync(user, role, CancellationToken))
                     {
-                        return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.UserNotInRole(role)));
+                        return IdentityLogger.Log(IdentityResult.Failed(ErrorDescriber.UserNotInRole(role)));
                     }
                     await userRoleStore.RemoveFromRoleAsync(user, role, CancellationToken);
                 }
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -1256,12 +1257,12 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 await store.SetEmailAsync(user, email, CancellationToken);
                 await store.SetEmailConfirmedAsync(user, false, CancellationToken);
                 await UpdateSecurityStampInternal(user);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -1306,10 +1307,10 @@ namespace Microsoft.AspNet.Identity
         {
             ThrowIfDisposed();
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 var token = await GenerateUserTokenAsync(user, Options.EmailConfirmationTokenProvider, "Confirmation");
-                IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                IdentityLogger.Log(IdentityResult.Success);
                 return token;
             }
         }
@@ -1329,14 +1330,14 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 if (!await VerifyUserTokenAsync(user, Options.EmailConfirmationTokenProvider, "Confirmation", token))
                 {
-                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
+                    return IdentityLogger.Log(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
                 }
                 await store.SetEmailConfirmedAsync(user, true, CancellationToken);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -1371,10 +1372,10 @@ namespace Microsoft.AspNet.Identity
         {
             ThrowIfDisposed();
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 var token = await GenerateUserTokenAsync(user, Options.ChangeEmailTokenProvider, GetChangeEmailPurpose(newEmail));
-                IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                IdentityLogger.Log(IdentityResult.Success);
                 return token;
             }
         }
@@ -1394,18 +1395,18 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 // Make sure the token is valid and the stamp matches
                 if (!await VerifyUserTokenAsync(user, Options.ChangeEmailTokenProvider, GetChangeEmailPurpose(newEmail), token))
                 {
-                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
+                    return IdentityLogger.Log(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
                 }
                 var store = GetEmailStore();
                 await store.SetEmailAsync(user, newEmail, CancellationToken);
                 await store.SetEmailConfirmedAsync(user, true, CancellationToken);
                 await UpdateSecurityStampInternal(user);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -1451,12 +1452,12 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 await store.SetPhoneNumberAsync(user, phoneNumber, CancellationToken);
                 await store.SetPhoneNumberConfirmedAsync(user, false, CancellationToken);
                 await UpdateSecurityStampInternal(user);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -1476,16 +1477,16 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 if (!await VerifyChangePhoneNumberTokenAsync(user, token, phoneNumber))
                 {
-                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
+                    return IdentityLogger.Log(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
                 }
                 await store.SetPhoneNumberAsync(user, phoneNumber, CancellationToken);
                 await store.SetPhoneNumberConfirmedAsync(user, true, CancellationToken);
                 await UpdateSecurityStampInternal(user);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -1521,12 +1522,12 @@ namespace Microsoft.AspNet.Identity
         {
             ThrowIfDisposed();
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 var token = Rfc6238AuthenticationService.GenerateCode(
                         await CreateSecurityTokenAsync(user), phoneNumber)
                            .ToString(CultureInfo.InvariantCulture);
-                IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                IdentityLogger.Log(IdentityResult.Success);
                 return token;
             }
         }
@@ -1542,7 +1543,7 @@ namespace Microsoft.AspNet.Identity
         {
             ThrowIfDisposed();
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 var securityToken = await CreateSecurityTokenAsync(user);
                 int code;
@@ -1550,11 +1551,11 @@ namespace Microsoft.AspNet.Identity
                 {
                     if (Rfc6238AuthenticationService.ValidateCode(securityToken, code, phoneNumber))
                     {
-                        IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                        IdentityLogger.Log(IdentityResult.Success);
                         return true;
                     }
                 }
-                IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
+                IdentityLogger.Log(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
                 return false;
             }
         }
@@ -1579,7 +1580,7 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException(nameof(tokenProvider));
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 if (!_tokenProviders.ContainsKey(tokenProvider))
                 {
@@ -1590,11 +1591,11 @@ namespace Microsoft.AspNet.Identity
 
                 if (result)
                 {
-                    IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                    IdentityLogger.Log(IdentityResult.Success);
                 }
                 else
                 {
-                    IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
+                    IdentityLogger.Log(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
                 }
 
                 return result;
@@ -1626,7 +1627,7 @@ namespace Microsoft.AspNet.Identity
 
             //TODO: Should we scope here ?
             var token = await _tokenProviders[tokenProvider].GenerateAsync(purpose, this, user);
-            IdentityLogger.LogIdentityResult(IdentityResult.Success);
+            IdentityLogger.Log(IdentityResult.Success);
             return token;
         }
 
@@ -1687,17 +1688,17 @@ namespace Microsoft.AspNet.Identity
                     Resources.NoTokenProvider, tokenProvider));
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 // Make sure the token is valid
                 var result = await _tokenProviders[tokenProvider].ValidateAsync("TwoFactor", token, this, user);
                 if (result)
                 {
-                    IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                    IdentityLogger.Log(IdentityResult.Success);
                 }
                 else
                 {
-                    IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
+                    IdentityLogger.Log(IdentityResult.Failed(ErrorDescriber.InvalidToken()));
                 }
                 return result;
             }
@@ -1722,10 +1723,10 @@ namespace Microsoft.AspNet.Identity
                     Resources.NoTokenProvider, tokenProvider));
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 var token = await _tokenProviders[tokenProvider].GenerateAsync("TwoFactor", this, user);
-                IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                IdentityLogger.Log(IdentityResult.Success);
                 return token;
             }
         }
@@ -1772,11 +1773,11 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 await store.SetTwoFactorEnabledAsync(user, enabled, CancellationToken);
                 await UpdateSecurityStampInternal(user);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -1827,10 +1828,10 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 await store.SetLockoutEnabledAsync(user, enabled, CancellationToken);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -1881,14 +1882,14 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 if (!await store.GetLockoutEnabledAsync(user, CancellationToken))
                 {
-                    return IdentityLogger.LogIdentityResult(IdentityResult.Failed(ErrorDescriber.UserLockoutNotEnabled()));
+                    return IdentityLogger.Log(IdentityResult.Failed(ErrorDescriber.UserLockoutNotEnabled()));
                 }
                 await store.SetLockoutEndDateAsync(user, lockoutEnd, CancellationToken);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -1908,18 +1909,18 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 // If this puts the user over the threshold for lockout, lock them out and reset the access failed count
                 var count = await store.IncrementAccessFailedCountAsync(user, CancellationToken);
                 if (count < Options.Lockout.MaxFailedAccessAttempts)
                 {
-                    return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                    return IdentityLogger.Log(await UpdateUserAsync(user));
                 }
                 await store.SetLockoutEndDateAsync(user, DateTimeOffset.UtcNow.Add(Options.Lockout.DefaultLockoutTimeSpan),
                     CancellationToken);
                 await store.ResetAccessFailedCountAsync(user, CancellationToken);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user));
+                return IdentityLogger.Log(await UpdateUserAsync(user));
             }
         }
 
@@ -1937,14 +1938,14 @@ namespace Microsoft.AspNet.Identity
                 throw new ArgumentNullException("user");
             }
 
-            using (Logger.BeginScope(await GetScopeMessageforUserAsync(user)))
+            using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
                 if (await GetAccessFailedCountAsync(user) == 0)
                 {
-                    return IdentityLogger.LogIdentityResult(IdentityResult.Success);
+                    return IdentityLogger.Log(IdentityResult.Success);
                 }
                 await store.ResetAccessFailedCountAsync(user, CancellationToken);
-                return IdentityLogger.LogIdentityResult(await UpdateUserAsync(user)); 
+                return IdentityLogger.Log(await UpdateUserAsync(user)); 
             }
         }
 
