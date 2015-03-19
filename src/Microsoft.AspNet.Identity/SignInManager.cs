@@ -63,10 +63,16 @@ namespace Microsoft.AspNet.Identity
 
         public virtual async Task<bool> CanSignInAsync(TUser user)
         {
-            var result = !(Options.SignIn.RequireConfirmedEmail && !(await UserManager.IsEmailConfirmedAsync(user))) ||
-                          (Options.SignIn.RequireConfirmedPhoneNumber && !(await UserManager.IsPhoneNumberConfirmedAsync(user)));
+            if (Options.SignIn.RequireConfirmedEmail && !(await UserManager.IsEmailConfirmedAsync(user)))
+            {
+                return IdentityLogger.Log(false);
+            }
+            if (Options.SignIn.RequireConfirmedPhoneNumber && !(await UserManager.IsPhoneNumberConfirmedAsync(user)))
+            {
+                return IdentityLogger.Log(false);
+            }
 
-            return IdentityLogger.Log(result);
+            return IdentityLogger.Log(true);
         }
 
         public virtual async Task SignInAsync(TUser user, bool isPersistent, string authenticationMethod = null)

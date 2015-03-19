@@ -333,9 +333,10 @@ namespace Microsoft.AspNet.Identity
             await UpdateNormalizedUserNameAsync(user);
             await UpdateNormalizedEmailAsync(user);
 
+            result = await Store.CreateAsync(user, CancellationToken);
             using (IdentityLogger.BeginScope(await GetScopeMessageforUserAsync(user)))
             {
-                return IdentityLogger.Log(await Store.CreateAsync(user, CancellationToken));
+                return IdentityLogger.Log(result);
             }
         }
 

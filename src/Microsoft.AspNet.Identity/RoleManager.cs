@@ -168,10 +168,10 @@ namespace Microsoft.AspNet.Identity
                 return result;
             }
             await UpdateNormalizedRoleNameAsync(role);
-
+            result = await Store.CreateAsync(role, CancellationToken);
             using (IdentityLogger.BeginScope(await GetScopeMessageforRoleAsync(role)))
             {
-                return IdentityLogger.Log(await Store.CreateAsync(role, CancellationToken));
+                return IdentityLogger.Log(result);
             }
         }
 
